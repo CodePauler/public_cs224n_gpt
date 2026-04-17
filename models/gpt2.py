@@ -28,7 +28,7 @@ class GPT2Model(GPTPreTrainedModel):
     self.embed_dropout = nn.Dropout(config.hidden_dropout_prob)
 
     # Register position_ids (1, len position emb) to buffer because it is a constant.
-    position_ids = torch.arange(config.max_position_embeddings).unsqueeze(0)
+    position_ids = torch.arange(config.max_position_embeddings).unsqueeze(0) # [1, max_position_embeddings] 这里max_position_embeddings表示GPT-2模型能够处理的最大输入长度
     self.register_buffer('position_ids', position_ids)
 
     # GPT-2 layers.
@@ -50,7 +50,7 @@ class GPT2Model(GPTPreTrainedModel):
     inputs_embeds = None
 
     ### YOUR CODE HERE
-    raise NotImplementedError
+    input_embeds = self.word_embedding(input_ids)
 
 
     pos_ids = self.position_ids[:, :seq_length]
@@ -59,7 +59,10 @@ class GPT2Model(GPTPreTrainedModel):
     ### TODO: Use pos_ids to get position embedding from self.pos_embedding into pos_embeds.
     ###       Then, add two embeddings together; then apply dropout and return.
     ### YOUR CODE HERE
-    raise NotImplementedError
+    pos_embeds = self.pos_embedding(pos_ids)
+    embeddings = input_embeds + pos_embeds
+    embeddings = self.embed_dropout(embeddings) 
+    return embeddings                               
 
 
   def encode(self, hidden_states, attention_mask):
@@ -106,7 +109,8 @@ class GPT2Model(GPTPreTrainedModel):
       return hidden_state(s) * E^T
     """
     ### YOUR CODE HERE
-    raise NotImplementedError
+    logits = torch.matmul(hidden_state, self.word_embedding.weight.T)
+    return logits
 
 
   @classmethod

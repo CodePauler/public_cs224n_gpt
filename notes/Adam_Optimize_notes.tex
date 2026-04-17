@@ -1,0 +1,102 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{listings}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{ctex}
+
+\title{Adam 与 AdamW：原理与实现笔记}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Adam 在做什么}
+Adam 结合了两种思想：
+\begin{itemize}
+  \item 动量（梯度一阶矩），
+  \item 自适应步长缩放（梯度二阶矩）。
+\end{itemize}
+
+在第 $t$ 步，记梯度为 $g_t = \nabla_\theta L_t$。
+
+\section{Adam 更新公式}
+\begin{align}
+  m_t &= \beta_1 m_{t-1} + (1-\beta_1) g_t, \\
+  v_t &= \beta_2 v_{t-1} + (1-\beta_2) g_t^2.
+\end{align}
+
+偏置修正：
+\begin{align}
+  \hat m_t &= \frac{m_t}{1-\beta_1^t}, \\
+  \hat v_t &= \frac{v_t}{1-\beta_2^t}.
+\end{align}
+
+参数更新：
+\begin{equation}
+  \theta_{t+1} = \theta_t - \alpha \frac{\hat m_t}{\sqrt{\hat v_t} + \varepsilon}.
+\end{equation}
+
+\section{AdamW（解耦权重衰减）}
+AdamW 在 Adam 主更新之后，\emph{额外}执行权重衰减：
+\begin{equation}
+  \theta \leftarrow \theta - \alpha\lambda\theta.
+\end{equation}
+
+这与把 $\lambda\theta$ 直接加到梯度中的做法不同。
+
+\section{实现清单}
+对每个参数张量：
+\begin{enumerate}
+  \item 首次初始化状态：\texttt{step}、\texttt{exp\_avg}、\texttt{exp\_avg\_sq}。
+  \item 更新一阶矩与二阶矩。
+  \item 若 \texttt{correct\_bias=True}，执行偏置修正。
+  \item 按 Adam 公式做主更新。
+  \item 再做 AdamW 的解耦权重衰减。
+\end{enumerate}
+
+\section{PyTorch 风格核心代码}
+\begin{lstlisting}[language=Python,basicstyle=\ttfamily\small]
+beta1, beta2 = group["betas"]
+eps = group["eps"]
+lr = group["lr"]
+wd = group["weight_decay"]
+
+state = self.state[p]
+if len(state) == 0:
+    state["step"] = 0
+    state["exp_avg"] = torch.zeros_like(p.data)
+    state["exp_avg_sq"] = torch.zeros_like(p.data)
+
+exp_avg = state["exp_avg"]
+exp_avg_sq = state["exp_avg_sq"]
+state["step"] += 1
+t = state["step"]
+
+exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
+exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
+
+denom = exp_avg_sq.sqrt().add_(eps)
+step_size = lr
+if group["correct_bias"]:
+    bc1 = 1 - beta1 ** t
+    bc2 = 1 - beta2 ** t
+    step_size = lr * (bc2 ** 0.5) / bc1
+
+p.data.addcdiv_(exp_avg, denom, value=-step_size)
+
+if wd > 0:
+    p.data.add_(p.data, alpha=-lr * wd)
+\end{lstlisting}
+
+\section{常见坑}
+\begin{itemize}
+  \item 把 L2 正则混进梯度，而不是使用解耦衰减。
+  \item 忘记递增 \texttt{step}。
+  \item 偏置修正公式写错。
+  \item \texttt{return} 后残留不可达代码。
+\end{itemize}
+
+\end{document}
