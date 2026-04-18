@@ -1,8 +1,13 @@
+import math
+
+import torch
 from torch import nn
 
-import torch.nn.functional as F
-
 from modules.attention import CausalSelfAttention
+
+
+def gpt2_gelu(x):
+  return 0.5 * x * (1.0 + torch.tanh(math.sqrt(2.0 / math.pi) * (x + 0.044715 * torch.pow(x, 3.0))))
 
 class GPT2Layer(nn.Module):
   """
@@ -50,7 +55,7 @@ class GPT2Layer(nn.Module):
     self.attention_dropout = nn.Dropout(config.hidden_dropout_prob)
     # Feed forward.
     self.interm_dense = nn.Linear(config.hidden_size, config.intermediate_size)
-    self.interm_af = F.gelu
+    self.interm_af = gpt2_gelu
     # Add-norm for feed forward.
     self.out_dense = nn.Linear(config.intermediate_size, config.hidden_size)
     self.out_layer_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
@@ -100,4 +105,3 @@ class GPT2Layer(nn.Module):
     layer_output = self.add(hidden_states, ffn_output, self.out_dense, self.out_dropout)
     return layer_output
     ### YOUR CODE HERE
-
