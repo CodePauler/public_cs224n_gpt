@@ -154,14 +154,14 @@ def load_data(filename, flag='train'):
   if flag == 'test':
     with open(filename, 'r') as fp:
       for record in csv.DictReader(fp, delimiter='\t'):
-        sent = record['sentence'].lower().strip()
-        sent_id = record['id'].lower().strip()
+        sent = record['sentence'].strip()
+        sent_id = record['id'].strip()
         data.append((sent, sent_id))
   else:
     with open(filename, 'r') as fp:
       for record in csv.DictReader(fp, delimiter='\t'):
-        sent = record['sentence'].lower().strip()
-        sent_id = record['id'].lower().strip()
+        sent = record['sentence'].strip()
+        sent_id = record['id'].strip()
         label = int(record['sentiment'].strip())
         if label not in num_labels:
           num_labels[label] = len(num_labels)
