@@ -114,6 +114,7 @@ def train(args):
 
   lr = args.lr
   optimizer = AdamW(model.parameters(), lr=lr, weight_decay=0.)
+  scaler = torch.amp.GradScaler('cuda')
   best_dev_acc = 0
 
   # Run for the specified number of epochs.
@@ -130,11 +131,12 @@ def train(args):
 
       # Compute the loss, gradients, and update the model's parameters.
       optimizer.zero_grad()
-      logits = model(b_ids, b_mask)
-      preds = torch.argmax(logits, dim=1)
-      loss = F.cross_entropy(logits, labels, reduction='mean')
-      loss.backward()
-      optimizer.step()
+      with torch.amp.autocast('cuda'):
+        logits = model(b_ids, b_mask)
+        loss = F.cross_entropy(logits, labels, reduction='mean')
+      scaler.scale(loss).backward()
+      scaler.step(optimizer)
+      scaler.update()
 
       train_loss += loss.item()
       num_batches += 1
