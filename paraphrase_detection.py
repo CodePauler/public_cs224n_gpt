@@ -12,6 +12,7 @@ trains and evaluates your ParaphraseGPT model and writes the required submission
 '''
 
 import argparse
+import os
 import random
 import torch
 
@@ -39,10 +40,11 @@ def seed_everything(seed=11711):
   random.seed(seed)
   np.random.seed(seed)
   torch.manual_seed(seed)
-  torch.cuda.manual_seed(seed)
-  torch.cuda.manual_seed_all(seed)
-  torch.backends.cudnn.benchmark = False
-  torch.backends.cudnn.deterministic = True
+  if torch.cuda.is_available():
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
 
 
 class ParaphraseGPT(nn.Module):
@@ -114,7 +116,7 @@ def train(args):
 
   lr = args.lr
   optimizer = AdamW(model.parameters(), lr=lr, weight_decay=0.)
-  scaler = torch.amp.GradScaler('cuda')
+  scaler = torch.amp.GradScaler('cuda') if args.use_gpu else None
   best_dev_acc = 0
 
   # Run for the specified number of epochs.
@@ -131,12 +133,18 @@ def train(args):
 
       # Compute the loss, gradients, and update the model's parameters.
       optimizer.zero_grad()
-      with torch.amp.autocast('cuda'):
+      if args.use_gpu:
+        with torch.amp.autocast('cuda'):
+          logits = model(b_ids, b_mask)
+          loss = F.cross_entropy(logits, labels, reduction='mean')
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
+      else:
         logits = model(b_ids, b_mask)
         loss = F.cross_entropy(logits, labels, reduction='mean')
-      scaler.scale(loss).backward()
-      scaler.step(optimizer)
-      scaler.update()
+        loss.backward()
+        optimizer.step()
 
       train_loss += loss.item()
       num_batches += 1
@@ -156,7 +164,7 @@ def train(args):
 def test(args):
   """Evaluate your model on the dev and test datasets; save the predictions to disk."""
   device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
-  saved = torch.load(args.filepath)
+  saved = torch.load(args.filepath, weights_only=False)
 
   model = ParaphraseGPT(saved['args'])
   model.load_state_dict(saved['model'])
@@ -179,6 +187,7 @@ def test(args):
   print(f"dev paraphrase acc :: {dev_para_acc :.3f}")
   test_para_y_pred, test_para_sent_ids = model_test_paraphrase(para_test_dataloader, model, device)
 
+  os.makedirs(os.path.dirname(args.para_dev_out) or '.', exist_ok=True)
   with open(args.para_dev_out, "w+") as f:
     f.write(f"id \t Predicted_Is_Paraphrase \n")
     for p, s in zip(dev_para_sent_ids, dev_para_y_pred):
@@ -237,4 +246,6 @@ if __name__ == "__main__":
   args.filepath = f'{args.epochs}-{args.lr}-paraphrase.pt'  # Save path.
   seed_everything(args.seed)  # Fix the seed for reproducibility.
   train(args)
+  if args.use_gpu:
+    torch.cuda.empty_cache()
   test(args)
