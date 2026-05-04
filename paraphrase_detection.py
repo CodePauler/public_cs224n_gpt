@@ -86,11 +86,7 @@ def save_model(model, optimizer, args, filepath):
     'model': model.state_dict(),
     'optim': optimizer.state_dict(),
     'args': args,
-    'system_rng': random.getstate(),
-    'numpy_rng': np.random.get_state(),
-    'torch_rng': torch.random.get_rng_state(),
   }
-
   torch.save(save_info, filepath)
   print(f"save the model to {filepath}")
 
@@ -245,7 +241,7 @@ if __name__ == "__main__":
   args = get_args()
   args.filepath = f'{args.epochs}-{args.lr}-paraphrase.pt'  # Save path.
   seed_everything(args.seed)  # Fix the seed for reproducibility.
-  train(args)
+  # train(args)
   if args.use_gpu:
     torch.cuda.empty_cache()
   test(args)
