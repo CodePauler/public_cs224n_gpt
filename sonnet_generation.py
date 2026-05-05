@@ -8,6 +8,7 @@ trains your SonnetGPT model and writes the required submission files.
 '''
 
 import argparse
+import os
 import random
 import torch
 
@@ -35,10 +36,11 @@ def seed_everything(seed=11711):
   random.seed(seed)
   np.random.seed(seed)
   torch.manual_seed(seed)
-  torch.cuda.manual_seed(seed)
-  torch.cuda.manual_seed_all(seed)
-  torch.backends.cudnn.benchmark = False
-  torch.backends.cudnn.deterministic = True
+  if torch.cuda.is_available():
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
 
 
 class SonnetGPT(nn.Module):
@@ -61,8 +63,10 @@ class SonnetGPT(nn.Module):
     not just the distribution over next tokens for the last token!
     """
     ### YOUR CODE HERE
-    raise NotImplementedError
-
+    outputs = self.gpt(input_ids=input_ids, attention_mask=attention_mask)
+    sequence_output, last_token = outputs['last_hidden_state'], outputs['last_token']
+    logits = self.gpt.hidden_state_to_token(sequence_output)
+    return logits
 
   def get_device(self):
     for param in self.gpt.parameters():
@@ -121,11 +125,7 @@ def save_model(model, optimizer, args, filepath):
     'model': model.state_dict(),
     'optim': optimizer.state_dict(),
     'args': args,
-    'system_rng': random.getstate(),
-    'numpy_rng': np.random.get_state(),
-    'torch_rng': torch.random.get_rng_state(),
   }
-
   torch.save(save_info, filepath)
   print(f"save the model to {filepath}")
 
@@ -147,6 +147,7 @@ def train(args):
 
   lr = args.lr
   optimizer = AdamW(model.parameters(), lr=lr)
+  scaler = torch.amp.GradScaler('cuda') if args.use_gpu else None
 
   # Run for the specified number of epochs.
   for epoch in range(args.epochs):
@@ -162,12 +163,22 @@ def train(args):
 
       # Compute the loss, gradients, and update the model's parameters.
       optimizer.zero_grad()
-      logits = model(b_ids, b_mask)
-      logits = rearrange(logits[:, :-1].contiguous(), 'b t d -> (b t) d')  # Ignore the last prediction in the sequence.
-      labels = b_ids[:, 1:].contiguous().flatten()  # Ignore the first token to compose the labels.
-      loss = F.cross_entropy(logits, labels, reduction='mean')
-      loss.backward()
-      optimizer.step()
+      if args.use_gpu:
+        with torch.amp.autocast('cuda'):
+          logits = model(b_ids, b_mask)
+          logits = rearrange(logits[:, :-1].contiguous(), 'b t d -> (b t) d')
+          labels = b_ids[:, 1:].contiguous().flatten()
+          loss = F.cross_entropy(logits, labels, reduction='mean')
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
+      else:
+        logits = model(b_ids, b_mask)
+        logits = rearrange(logits[:, :-1].contiguous(), 'b t d -> (b t) d')
+        labels = b_ids[:, 1:].contiguous().flatten()
+        loss = F.cross_entropy(logits, labels, reduction='mean')
+        loss.backward()
+        optimizer.step()
 
       train_loss += loss.item()
       num_batches += 1
@@ -188,7 +199,7 @@ def train(args):
 @torch.no_grad()
 def generate_submission_sonnets(args):
   device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
-  saved = torch.load(f'{args.epochs-1}_{args.filepath}', weights_only=False)
+  saved = torch.load(f'{args.epochs-1}_{args.filepath}', weights_only=False, map_location=device)
 
   model = SonnetGPT(saved['args'])
   model.load_state_dict(saved['model'])
@@ -209,6 +220,7 @@ def generate_submission_sonnets(args):
 
     print(f'{decoded_output}\n\n')
 
+  os.makedirs(os.path.dirname(args.sonnet_out) or '.', exist_ok=True)
   with open(args.sonnet_out, "w+") as f:
     f.write(f"--Generated Sonnets-- \n\n")
     for sonnet in generated_sonnets:
@@ -265,4 +277,6 @@ if __name__ == "__main__":
   args.filepath = f'{args.epochs}-{args.lr}-sonnet.pt'  # Save path.
   seed_everything(args.seed)  # Fix the seed for reproducibility.
   train(args)
+  if args.use_gpu:
+    torch.cuda.empty_cache()
   generate_submission_sonnets(args)
