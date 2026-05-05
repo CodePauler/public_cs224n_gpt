@@ -24,6 +24,7 @@ from einops import rearrange
 from datasets import (
   SonnetsDataset,
 )
+from evaluation import test_sonnet
 from models.gpt2 import GPT2Model
 
 from optimizer import AdamW
@@ -280,3 +281,6 @@ if __name__ == "__main__":
   if args.use_gpu:
     torch.cuda.empty_cache()
   generate_submission_sonnets(args)
+
+  chrf_dev = test_sonnet(args.sonnet_out, gold_path='data/TRUE_sonnets_held_out_dev.txt')
+  print(f'Dev chrF :: {chrf_dev :.3f}')
